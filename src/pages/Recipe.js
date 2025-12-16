@@ -157,6 +157,11 @@ export default function CommunityRecipes() {
   const [uploadImageValidating, setUploadImageValidating] = useState(false);
   const [uploadImageValidation, setUploadImageValidation] = useState(null);
 
+  // Copyright check states for upload modal
+  const [uploadCopyrightId, setUploadCopyrightId] = useState(null);
+  const [uploadCopyrightStatus, setUploadCopyrightStatus] = useState(null);
+  const [uploadCopyrightResult, setUploadCopyrightResult] = useState(null);
+
   // NEW: Favorites/Bookmarks (local storage for demo)
   const [favorites, setFavorites] = useState(() => {
     try {
@@ -1268,7 +1273,81 @@ export default function CommunityRecipes() {
     setUploadImageValidation(null);
     setUploadLoading(false);
     uploadingRef.current = false;
+    // Clear copyright state
+    setUploadCopyrightId(null);
+    setUploadCopyrightStatus(null);
+    setUploadCopyrightResult(null);
   };
+
+  // Copyright polling effect for upload modal
+  useEffect(() => {
+    console.log('[Recipe] Copyright polling effect, uploadCopyrightId:', uploadCopyrightId);
+    if (!uploadCopyrightId) return;
+
+    let isCancelled = false;
+    let pollCount = 0;
+    const MAX_POLLS = 30;
+
+    const pollCopyrightStatus = async () => {
+      if (isCancelled) return;
+      pollCount++;
+      console.log(`[Recipe Copyright Poll #${pollCount}] Checking: ${uploadCopyrightId}`);
+
+      try {
+        const headers = { "Content-Type": "application/json", ...authHeaders() };
+        const response = await fetch(`${API_BASE}/api/recipes/copyright-status/${uploadCopyrightId}`, {
+          method: "GET",
+          headers,
+        });
+        const data = await response.json();
+        console.log(`[Recipe Copyright Poll #${pollCount}] Response:`, data);
+
+        if (isCancelled) return;
+
+        if (data.status === 'complete' || (data.success && data.status === 'complete')) {
+          console.log('[Recipe] Copyright check complete:', data.result);
+          setUploadCopyrightStatus('complete');
+          setUploadCopyrightResult(data.result);
+
+          // Show alert for high risk
+          if (data.result?.riskLevel === 'high' || data.result?.riskLevel === 'very_high') {
+            const matchCount = data.result?.matchCount || 'multiple';
+            const isStockPhoto = data.result?.riskLevel === 'very_high';
+            alert(
+              `⚠️ COPYRIGHT WARNING\n\n` +
+              `${isStockPhoto ? 'This appears to be a stock photo!' : 'This image was found on ' + matchCount + ' website(s).'}\n\n` +
+              `It may be copyrighted. Please consider using your own original photo.`
+            );
+          }
+          return;
+        }
+
+        if (data.status === 'error' || data.status === 'not_found') {
+          setUploadCopyrightStatus('error');
+          return;
+        }
+
+        setUploadCopyrightStatus(data.status || 'pending');
+        if (pollCount < MAX_POLLS) {
+          setTimeout(pollCopyrightStatus, 2000);
+        } else {
+          setUploadCopyrightStatus('error');
+        }
+      } catch (error) {
+        console.error('[Recipe Copyright Poll] Error:', error);
+        if (!isCancelled && pollCount < 3) {
+          setTimeout(pollCopyrightStatus, 2000);
+        } else {
+          setUploadCopyrightStatus('error');
+        }
+      }
+    };
+
+    setUploadCopyrightStatus('pending');
+    pollCopyrightStatus();
+
+    return () => { isCancelled = true; };
+  }, [uploadCopyrightId]);
 
   const handleUploadFormChange = (field, value) => {
     setUploadForm(prev => ({ ...prev, [field]: value }));
@@ -1297,6 +1376,13 @@ export default function CommunityRecipes() {
         details: data.details || {},
         skipped: data.skipped
       });
+
+      // Start copyright check polling if uploadId is present
+      console.log('[Recipe validateUploadImage] Response copyrightCheck:', data.copyrightCheck);
+      if (data.copyrightCheck?.uploadId) {
+        console.log('[Recipe] Setting copyright uploadId:', data.copyrightCheck.uploadId);
+        setUploadCopyrightId(data.copyrightCheck.uploadId);
+      }
 
       // Show alert if not approved
       if (!data.approved && !data.skipped) {
@@ -1468,7 +1554,8 @@ export default function CommunityRecipes() {
       notes: uploadForm.notes.trim(),
       servings: uploadForm.servings,
       tags: uploadForm.tags,
-      allergens: uploadForm.allergens
+      allergens: uploadForm.allergens,
+      copyrightUploadId: uploadCopyrightId || null
     };
 
     try {
@@ -2531,6 +2618,76 @@ export default function CommunityRecipes() {
                       ? (uploadImageValidation.skipped ? 'Image accepted' : 'Image approved - food detected!')
                       : uploadImageValidation.message}
                   </p>
+                )}
+
+                {/* COPYRIGHT STATUS BANNER */}
+                {uploadCopyrightId && (
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    border: '1px solid',
+                    borderColor: uploadCopyrightStatus === 'complete' && uploadCopyrightResult?.riskLevel === 'low' ? '#22c55e' :
+                                 uploadCopyrightStatus === 'complete' && uploadCopyrightResult?.riskLevel === 'medium' ? '#eab308' :
+                                 uploadCopyrightStatus === 'complete' && ['high', 'very_high'].includes(uploadCopyrightResult?.riskLevel) ? '#ef4444' :
+                                 '#3b82f6',
+                    backgroundColor: uploadCopyrightStatus === 'complete' && uploadCopyrightResult?.riskLevel === 'low' ? '#f0fdf4' :
+                                     uploadCopyrightStatus === 'complete' && uploadCopyrightResult?.riskLevel === 'medium' ? '#fefce8' :
+                                     uploadCopyrightStatus === 'complete' && ['high', 'very_high'].includes(uploadCopyrightResult?.riskLevel) ? '#fef2f2' :
+                                     '#eff6ff'
+                  }}>
+                    {(uploadCopyrightStatus === 'pending' || uploadCopyrightStatus === 'processing' || !uploadCopyrightStatus) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '20px' }}>🔍</span>
+                        <div>
+                          <p style={{ margin: 0, fontSize: '14px', fontWeight: '500', color: '#1e40af' }}>Checking image originality...</p>
+                          <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#3b82f6' }}>This helps protect creators' rights</p>
+                        </div>
+                      </div>
+                    )}
+                    {uploadCopyrightStatus === 'complete' && uploadCopyrightResult && (
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                        <span style={{ fontSize: '20px' }}>
+                          {uploadCopyrightResult.riskLevel === 'low' && '✅'}
+                          {uploadCopyrightResult.riskLevel === 'medium' && '⚠️'}
+                          {uploadCopyrightResult.riskLevel === 'high' && '🚫'}
+                          {uploadCopyrightResult.riskLevel === 'very_high' && '🛑'}
+                        </span>
+                        <div>
+                          {uploadCopyrightResult.riskLevel === 'low' && (
+                            <>
+                              <p style={{ margin: 0, fontSize: '14px', fontWeight: '500', color: '#166534' }}>Image appears to be original</p>
+                              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#22c55e' }}>No copyright concerns detected</p>
+                            </>
+                          )}
+                          {uploadCopyrightResult.riskLevel === 'medium' && (
+                            <>
+                              <p style={{ margin: 0, fontSize: '14px', fontWeight: '500', color: '#854d0e' }}>Image found on {uploadCopyrightResult.matchCount || 'some'} website(s)</p>
+                              <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#ca8a04' }}>May require review - please ensure you have rights to use this image</p>
+                            </>
+                          )}
+                          {uploadCopyrightResult.riskLevel === 'high' && (
+                            <>
+                              <p style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#b91c1c' }}>Potential Copyright Issue Detected</p>
+                              <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#dc2626' }}>This image was found on {uploadCopyrightResult.matchCount || 'multiple'} recipe website(s). Please use your own original photo.</p>
+                            </>
+                          )}
+                          {uploadCopyrightResult.riskLevel === 'very_high' && (
+                            <>
+                              <p style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: '#b91c1c' }}>Stock Photo Detected - Likely Copyrighted</p>
+                              <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#dc2626' }}>This image appears to be from a stock photo website. Please replace with your own original photo.</p>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {uploadCopyrightStatus === 'error' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '20px' }}>⏱️</span>
+                        <p style={{ margin: 0, fontSize: '14px', color: '#6b7280' }}>Copyright check unavailable - proceeding with upload</p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
 

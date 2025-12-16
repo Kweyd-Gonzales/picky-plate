@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Heart, RefreshCw, Users, MessageSquare, Bot, ChefHat, Calendar, MapPin, Utensils, Sparkles, X, Star, Send, Settings, Flame, Salad, Coffee, Cake, Globe, Zap, Pizza, Sandwich } from 'lucide-react';
+import { Heart, RefreshCw, Users, MessageSquare, Bot, ChefHat, Calendar, MapPin, Utensils, Sparkles, X, Star, Send, Settings, Flame, Salad, Coffee, Cake, Globe, Zap, Pizza, Sandwich, AlertTriangle, Info, Plus } from 'lucide-react';
 import { useNavigate } from "react-router-dom";
 import LoadingModal from '../components/LoadingModal';
 import { useAuth } from "../auth/AuthContext";
 import { getCached, setCache, CACHE_KEYS, CACHE_TTL } from '../utils/cache';
+import { DIET_HIERARCHY, RELIGIOUS_RULES, getDietConflictsFromDislikes } from '../utils/preferenceRules';
 import './Dashboard.css';
 
 
@@ -106,7 +107,12 @@ export default function Dashboard() {
 
   const cameFromSignup = routeFlag || queryFlag || sessionTrigger;
 
+  // Only show onboarding modal if user is authenticated
+  const isAuthenticated = !!user;
+
   const [showWelcomeModal, setShowWelcomeModal] = useState(() => {
+    // Don't show modal if not authenticated
+    if (!isAuthenticated) return false;
     try {
       const alreadyDone = localStorage.getItem(ONB_KEY) === "1";
       if (cameFromSignup && forceFlag) return true;
@@ -116,8 +122,21 @@ export default function Dashboard() {
     }
   });
 
+  // Show modal when user becomes authenticated and came from signup
   useEffect(() => {
-    if (!cameFromSignup) return;
+    if (isAuthenticated && cameFromSignup) {
+      try {
+        const alreadyDone = localStorage.getItem(ONB_KEY) === "1";
+        if (!alreadyDone || forceFlag) {
+          setShowWelcomeModal(true);
+        }
+      } catch {}
+    }
+  }, [isAuthenticated, cameFromSignup, forceFlag, ONB_KEY]);
+
+  useEffect(() => {
+    // Only clear triggers if user is authenticated
+    if (!cameFromSignup || !isAuthenticated) return;
     try {
       sessionStorage.removeItem("pap:onboardingTrigger");
       localStorage.removeItem("pap:onboardingForce");
@@ -150,6 +169,31 @@ export default function Dashboard() {
   const [savingOnboarding, setSavingOnboarding] = useState(false);
   const [onboardingError, setOnboardingError] = useState("");
 
+  // Sub-options state for dislikes with expandable sub-categories
+  const [expandedDislike, setExpandedDislike] = useState(null);
+  const [selectedSubOptions, setSelectedSubOptions] = useState({});
+
+  // Custom "Others" input state for adding custom dietary needs
+  const [customItems, setCustomItems] = useState({
+    dislikes: [],
+    allergens: [],
+    diets: []
+  });
+  const [customInputValue, setCustomInputValue] = useState('');
+  const [showCustomInput, setShowCustomInput] = useState(null); // 'dislikes' | 'allergens' | 'diets' | null
+
+  // Vegetable sub-options for more specific vegetable dislikes
+  const vegetableSubOptions = [
+    { id: "all-vegetables", name: "All Vegetables", icon: "🥬" },
+    { id: "leafy-greens", name: "Leafy Greens", description: "Spinach, Kale, Lettuce", icon: "🥬" },
+    { id: "root-vegetables", name: "Root Vegetables", description: "Carrots, Potatoes, Beets", icon: "🥕" },
+    { id: "cruciferous", name: "Cruciferous", description: "Broccoli, Cauliflower, Cabbage", icon: "🥦" },
+    { id: "alliums", name: "Alliums", description: "Onions, Garlic, Leeks", icon: "🧅" },
+    { id: "nightshades", name: "Nightshades", description: "Tomatoes, Peppers, Eggplant", icon: "🍅" },
+    { id: "squash", name: "Squash & Gourds", description: "Zucchini, Pumpkin, Cucumber", icon: "🥒" },
+    { id: "mushrooms", name: "Mushrooms", description: "All types of mushrooms", icon: "🍄" },
+  ];
+
   async function persistOnboarding() {
     setSavingOnboarding(true);
     setOnboardingError("");
@@ -157,8 +201,10 @@ export default function Dashboard() {
       const payload = {
         likes: selectedCuisines,
         dislikes: selectedDislikes,
+        dislikeSubOptions: selectedSubOptions, // Include specific sub-options (e.g., which vegetables)
         diets: selectedDiets,
         allergens: selectedAllergens,
+        customItems: customItems, // Include custom "Others" items
         onboardingDone: true
       };
 
@@ -203,14 +249,220 @@ export default function Dashboard() {
     await persistOnboarding();
   };
 
-  const toggleSelection = (id, type) => {
-    const toggle = (setter) =>
-      setter((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // Conflict warnings state
+  const [conflictWarnings, setConflictWarnings] = useState([]);
+  const [conflictErrors, setConflictErrors] = useState([]);
 
-    if (type === "cuisine") toggle(setSelectedCuisines);
-    else if (type === "dislike") toggle(setSelectedDislikes);
-    else if (type === "diet") toggle(setSelectedDiets);
-    else if (type === "allergen") toggle(setSelectedAllergens);
+  // Calculate disabled diets based on current selection AND current dislikes
+  const disabledDiets = useMemo(() => {
+    const disabled = [];
+
+    // Disabled from current diet selection
+    if (selectedDiets.length > 0) {
+      const currentDiet = selectedDiets[0];
+      const dietRules = DIET_HIERARCHY[currentDiet];
+      if (dietRules?.disables) {
+        disabled.push(...dietRules.disables);
+      }
+    }
+
+    return disabled;
+  }, [selectedDiets]);
+
+  // Get diet warnings/errors from current dislikes (BIDIRECTIONAL CHECK)
+  const dietConflictsFromDislikes = useMemo(() => {
+    // Only include 'vegetables' in conflict check if "All Vegetables" is selected
+    // (not when specific vegetable types are selected)
+    const dislikesForConflictCheck = selectedDislikes.filter(dislike => {
+      if (dislike === 'vegetables') {
+        // Check if "all-vegetables" is selected or no specific sub-options chosen
+        const vegSubs = selectedSubOptions.vegetables || [];
+        return vegSubs.includes('all-vegetables') || vegSubs.length === 0;
+      }
+      return true;
+    });
+    return getDietConflictsFromDislikes(dislikesForConflictCheck);
+  }, [selectedDislikes, selectedSubOptions]);
+
+  // Check for conflicts whenever selections change
+  useEffect(() => {
+    const warnings = [];
+    const errors = [];
+
+    // Check diet vs dislike conflicts (when diet is selected)
+    if (selectedDiets.length > 0) {
+      const currentDiet = selectedDiets[0];
+      const dietRules = DIET_HIERARCHY[currentDiet];
+
+      // Check for ERROR conflicts (e.g., pescatarian + seafood)
+      if (dietRules?.conflictsWith) {
+        const { dislike, message } = dietRules.conflictsWith;
+        if (selectedDislikes.includes(dislike)) {
+          errors.push({
+            type: 'diet-dislike',
+            message: message || `${dietRules.label} diet conflicts with disliking ${dislike}.`
+          });
+        }
+      }
+
+      // Check for WARNING conflicts (e.g., vegan + vegetables)
+      if (dietRules?.warnsWith) {
+        const { dislike, message } = dietRules.warnsWith;
+        if (selectedDislikes.includes(dislike)) {
+          warnings.push({
+            type: 'diet-dislike-warning',
+            message: message || `${dietRules.label} may have limited options when you dislike ${dislike}.`
+          });
+        }
+      }
+
+      // Check diet vs cuisine warnings (keto + carb-heavy cuisines)
+      if (dietRules?.warns && dietRules.warns.length > 0) {
+        const conflictingCuisines = selectedCuisines.filter(c => dietRules.warns.includes(c));
+        if (conflictingCuisines.length > 0) {
+          warnings.push({
+            type: 'diet-cuisine',
+            message: `${dietRules?.label || currentDiet} may have limited options in ${conflictingCuisines.join(', ')} cuisine.`
+          });
+        }
+      }
+    }
+
+    // Check religious restrictions vs cuisine warnings (halal + pork-heavy cuisines)
+    selectedDiets.forEach(diet => {
+      const rules = RELIGIOUS_RULES[diet];
+      if (rules?.strictLevels) {
+        const strictRules = rules.strictLevels['moderate'];
+        if (strictRules?.cuisineWarnings) {
+          selectedCuisines.forEach(cuisine => {
+            if (strictRules.cuisineWarnings[cuisine]) {
+              warnings.push({
+                type: 'religious-cuisine',
+                message: strictRules.cuisineWarnings[cuisine]
+              });
+            }
+          });
+        }
+      }
+    });
+
+    setConflictWarnings(warnings);
+    setConflictErrors(errors);
+  }, [selectedDiets, selectedDislikes, selectedCuisines]);
+
+  const toggleSelection = (id, type, hasSubOptions = false) => {
+    if (type === "cuisine") {
+      setSelectedCuisines((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    } else if (type === "dislike") {
+      // Check if this dislike has sub-options
+      if (hasSubOptions) {
+        // Toggle expansion of sub-options panel
+        setExpandedDislike((prev) => (prev === id ? null : id));
+      } else {
+        setSelectedDislikes((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+      }
+    } else if (type === "diet") {
+      // SINGLE SELECT for diets - clicking same deselects, clicking different replaces
+      setSelectedDiets((prev) => {
+        if (prev.includes(id)) {
+          return []; // Deselect if clicking same
+        }
+        return [id]; // Replace with new selection (single select)
+      });
+    } else if (type === "allergen") {
+      setSelectedAllergens((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    }
+  };
+
+  // Toggle sub-option for dislikes with sub-categories (e.g., vegetables)
+  const toggleSubOption = (parentId, subOptionId) => {
+    setSelectedSubOptions((prev) => {
+      const currentSubs = prev[parentId] || [];
+      const isAllVegetables = subOptionId === 'all-vegetables';
+
+      if (isAllVegetables) {
+        // "All Vegetables" is exclusive - selecting it clears specific subs and adds main dislike
+        if (currentSubs.includes(subOptionId)) {
+          // Deselect "All Vegetables" - remove from dislikes
+          setSelectedDislikes((d) => d.filter((x) => x !== parentId));
+          return { ...prev, [parentId]: [] };
+        } else {
+          // Select "All Vegetables" - add to main dislikes, clear specific subs
+          setSelectedDislikes((d) => (d.includes(parentId) ? d : [...d, parentId]));
+          return { ...prev, [parentId]: [subOptionId] };
+        }
+      } else {
+        // Selecting specific sub-option
+        if (currentSubs.includes(subOptionId)) {
+          // Deselect this sub-option
+          const newSubs = currentSubs.filter((x) => x !== subOptionId);
+          // If no more specific subs, remove from main dislikes (unless "all" was selected)
+          if (newSubs.length === 0 || (newSubs.length === 1 && newSubs[0] === 'all-vegetables')) {
+            if (!newSubs.includes('all-vegetables')) {
+              setSelectedDislikes((d) => d.filter((x) => x !== parentId));
+            }
+          }
+          return { ...prev, [parentId]: newSubs };
+        } else {
+          // Select this sub-option - remove "All Vegetables" if present
+          const newSubs = [...currentSubs.filter((x) => x !== 'all-vegetables'), subOptionId];
+          // Add parentId to dislikes but mark it as "specific" (not all)
+          // We'll store specific selections but NOT trigger the vegan/vegetarian warning
+          setSelectedDislikes((d) => (d.includes(parentId) ? d : [...d, parentId]));
+          return { ...prev, [parentId]: newSubs };
+        }
+      }
+    });
+  };
+
+  // Check if "All Vegetables" is selected (triggers vegan/vegetarian warning)
+  const isAllVegetablesSelected = () => {
+    return selectedSubOptions.vegetables?.includes('all-vegetables') ||
+           (selectedDislikes.includes('vegetables') && (!selectedSubOptions.vegetables || selectedSubOptions.vegetables.length === 0));
+  };
+
+  // Add custom item to a category
+  const addCustomItem = (category) => {
+    const trimmed = customInputValue.trim();
+    if (!trimmed) return;
+
+    // Prevent duplicates
+    if (customItems[category].some(item => item.toLowerCase() === trimmed.toLowerCase())) {
+      return;
+    }
+
+    setCustomItems(prev => ({
+      ...prev,
+      [category]: [...prev[category], trimmed]
+    }));
+    setCustomInputValue('');
+  };
+
+  // Remove custom item from a category
+  const removeCustomItem = (category, item) => {
+    setCustomItems(prev => ({
+      ...prev,
+      [category]: prev[category].filter(i => i !== item)
+    }));
+  };
+
+  // Check if a diet option is disabled (from diet hierarchy OR from dislike conflicts)
+  const isDietDisabled = (dietId) => {
+    // Disabled from another diet selection
+    if (disabledDiets.includes(dietId)) return true;
+    // Disabled due to error-level conflict with dislikes (e.g., pescatarian + seafood dislike)
+    if (dietConflictsFromDislikes.dietErrors[dietId]) return true;
+    return false;
+  };
+
+  // Get warning message for a diet option (from dislike conflicts)
+  const getDietWarning = (dietId) => {
+    return dietConflictsFromDislikes.dietWarnings[dietId] || null;
+  };
+
+  // Get error message for a diet option (from dislike conflicts)
+  const getDietError = (dietId) => {
+    return dietConflictsFromDislikes.dietErrors[dietId] || null;
   };
 
   const openOnboardingPreview = () => {
@@ -237,7 +489,7 @@ export default function Dashboard() {
   const dislikeOptions = [
     { id: "seafood", name: "Seafood", image: `${process.env.PUBLIC_URL}/images/seafood.jpg` },
     { id: "spicy", name: "Spicy Food", image: `${process.env.PUBLIC_URL}/images/spicy.jpg` },
-    { id: "vegetables", name: "Vegetables", image: `${process.env.PUBLIC_URL}/images/vegetables.jpg` },
+    { id: "vegetables", name: "Vegetables", image: `${process.env.PUBLIC_URL}/images/vegetables.jpg`, hasSubOptions: true },
     { id: "meat", name: "Meat", image: `${process.env.PUBLIC_URL}/images/meat.jpg` },
     { id: "dairy", name: "Dairy", image: `${process.env.PUBLIC_URL}/images/dairy.jpg` },
     { id: "gluten", name: "Gluten", image: `${process.env.PUBLIC_URL}/images/gluten.jpeg` },
@@ -455,6 +707,31 @@ export default function Dashboard() {
             </div>
             <div className="onboarding-content">
               {onboardingError && <div className="onboarding-error">{onboardingError}</div>}
+
+              {/* Show conflict errors */}
+              {conflictErrors.length > 0 && (
+                <div className="preference-error-banner">
+                  {conflictErrors.map((error, idx) => (
+                    <div key={idx} className="preference-error-item">
+                      <X className="preference-error-item-icon" />
+                      <span className="preference-error-item-text">{error.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Show conflict warnings */}
+              {conflictWarnings.length > 0 && (
+                <div className="preference-warning-banner">
+                  {conflictWarnings.map((warning, idx) => (
+                    <div key={idx} className="preference-warning-item">
+                      <AlertTriangle className="preference-warning-item-icon" />
+                      <span className="preference-warning-item-text">{warning.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="onboarding-grid">
                 {currentStep === 1 && cuisineOptions.map((option) => (
                   <div key={option.id} onClick={() => toggleSelection(option.id, "cuisine")} className={`onboarding-option ${selectedCuisines.includes(option.id) ? "onboarding-option-selected-yellow" : ""}`}>
@@ -463,27 +740,225 @@ export default function Dashboard() {
                     {selectedCuisines.includes(option.id) && (<div className="onboarding-option-check onboarding-option-check-yellow"><svg className="onboarding-option-check-icon" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg></div>)}
                   </div>
                 ))}
-                {currentStep === 2 && dislikeOptions.map((option) => (
-                  <div key={option.id} onClick={() => toggleSelection(option.id, "dislike")} className={`onboarding-option ${selectedDislikes.includes(option.id) ? "onboarding-option-selected-red" : ""}`}>
-                    <img src={option.image} alt={option.name} className="onboarding-option-image" width="150" height="112" loading="lazy" />
-                    <div className="onboarding-option-overlay"><span className="onboarding-option-name">{option.name}</span></div>
-                    {selectedDislikes.includes(option.id) && (<div className="onboarding-option-check onboarding-option-check-red"><X className="onboarding-option-check-icon" /></div>)}
-                  </div>
-                ))}
-                {currentStep === 3 && dietOptions.map((option) => (
-                  <div key={option.id} onClick={() => toggleSelection(option.id, "diet")} className={`onboarding-option ${selectedDiets.includes(option.id) ? "onboarding-option-selected-yellow" : ""}`}>
-                    <img src={option.image} alt={option.name} className="onboarding-option-image" width="150" height="112" loading="lazy" />
-                    <div className="onboarding-option-overlay"><span className="onboarding-option-name">{option.name}</span></div>
-                    {selectedDiets.includes(option.id) && (<div className="onboarding-option-check onboarding-option-check-yellow"><svg className="onboarding-option-check-icon" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg></div>)}
-                  </div>
-                ))}
-                {currentStep === 4 && allergenOptions.map((option) => (
-                  <div key={option.id} onClick={() => toggleSelection(option.id, "allergen")} className={`onboarding-option ${selectedAllergens.includes(option.id) ? "onboarding-option-selected-red" : ""}`}>
-                    <img src={option.image} alt={option.name} className="onboarding-option-image" width="150" height="112" loading="lazy" />
-                    <div className="onboarding-option-overlay"><span className="onboarding-option-name">{option.name}</span></div>
-                    {selectedAllergens.includes(option.id) && (<div className="onboarding-option-check onboarding-option-check-red"><svg className="onboarding-option-check-icon" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg></div>)}
-                  </div>
-                ))}
+                {currentStep === 2 && (
+                  <>
+                    {dislikeOptions.map((option) => {
+                      const isExpanded = expandedDislike === option.id;
+                      const hasSubSelections = selectedSubOptions[option.id]?.length > 0;
+                      const isSelected = selectedDislikes.includes(option.id);
+
+                      return (
+                        <div
+                          key={option.id}
+                          onClick={() => toggleSelection(option.id, "dislike", option.hasSubOptions)}
+                          className={`onboarding-option ${isSelected ? "onboarding-option-selected-red" : ""} ${isExpanded ? "onboarding-option-expanded" : ""} ${hasSubSelections ? "onboarding-option-has-subs" : ""}`}
+                        >
+                          <img src={option.image} alt={option.name} className="onboarding-option-image" width="150" height="112" loading="lazy" />
+                          <div className="onboarding-option-overlay">
+                            <span className="onboarding-option-name">{option.name}</span>
+                            {option.hasSubOptions && (
+                              <span className="onboarding-option-expand-hint">
+                                {isExpanded ? "▲ Tap to collapse" : "▼ Tap to specify"}
+                              </span>
+                            )}
+                          </div>
+                          {isSelected && !option.hasSubOptions && (
+                            <div className="onboarding-option-check onboarding-option-check-red">
+                              <X className="onboarding-option-check-icon" />
+                            </div>
+                          )}
+                          {hasSubSelections && (
+                            <div className="onboarding-option-sub-count">
+                              {selectedSubOptions[option.id].includes('all-vegetables') ? 'All' : selectedSubOptions[option.id].length}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Sub-options panel for vegetables */}
+                    {expandedDislike === 'vegetables' && (
+                      <div className="sub-options-panel">
+                        <div className="sub-options-header">
+                          <span className="sub-options-title">Which vegetables do you dislike?</span>
+                          <button
+                            className="sub-options-close"
+                            onClick={(e) => { e.stopPropagation(); setExpandedDislike(null); }}
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                        <div className="sub-options-grid">
+                          {vegetableSubOptions.map((subOption) => {
+                            const isSubSelected = selectedSubOptions.vegetables?.includes(subOption.id);
+                            const isAllSelected = selectedSubOptions.vegetables?.includes('all-vegetables');
+                            const isDisabledBecauseAll = isAllSelected && subOption.id !== 'all-vegetables';
+
+                            return (
+                              <div
+                                key={subOption.id}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isDisabledBecauseAll) {
+                                    toggleSubOption('vegetables', subOption.id);
+                                  }
+                                }}
+                                className={`sub-option ${isSubSelected ? "sub-option-selected" : ""} ${isDisabledBecauseAll ? "sub-option-disabled" : ""} ${subOption.id === 'all-vegetables' ? "sub-option-all" : ""}`}
+                              >
+                                <span className="sub-option-icon">{subOption.icon}</span>
+                                <div className="sub-option-content">
+                                  <span className="sub-option-name">{subOption.name}</span>
+                                  {subOption.description && (
+                                    <span className="sub-option-description">{subOption.description}</span>
+                                  )}
+                                </div>
+                                {isSubSelected && (
+                                  <div className="sub-option-check">
+                                    <X size={14} />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {isAllVegetablesSelected() && (
+                          <div className="sub-options-warning">
+                            <AlertTriangle size={16} />
+                            <span>Selecting "All Vegetables" will show a warning on Vegan/Vegetarian diets.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+                {currentStep === 3 && dietOptions.map((option) => {
+                  const isDisabled = isDietDisabled(option.id);
+                  const isSelected = selectedDiets.includes(option.id);
+                  const warning = getDietWarning(option.id);
+                  const hasWarning = warning && !isDisabled;
+                  return (
+                    <div
+                      key={option.id}
+                      onClick={() => !isDisabled && toggleSelection(option.id, "diet")}
+                      className={`onboarding-option ${isSelected ? "onboarding-option-selected-yellow" : ""} ${isDisabled ? "onboarding-option-disabled" : ""} ${hasWarning ? "onboarding-option-warning" : ""}`}
+                      title={isDisabled ? "Conflicts with your current selection" : hasWarning ? warning.message : ""}
+                    >
+                      <img
+                        src={option.image}
+                        alt={option.name}
+                        className={`onboarding-option-image ${isDisabled ? "onboarding-option-image-disabled" : ""}`}
+                        width="150"
+                        height="112"
+                        loading="lazy"
+                      />
+                      <div className="onboarding-option-overlay">
+                        <span className="onboarding-option-name">{option.name}</span>
+                      </div>
+                      {isSelected && (
+                        <div className="onboarding-option-check onboarding-option-check-yellow">
+                          <svg className="onboarding-option-check-icon" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                      )}
+                      {isDisabled && (
+                        <div className="onboarding-option-disabled-overlay">
+                          <AlertTriangle className="onboarding-option-disabled-icon" />
+                          <span className="onboarding-option-disabled-text">Conflict</span>
+                        </div>
+                      )}
+                      {hasWarning && !isSelected && (
+                        <div className="onboarding-option-warning-badge" title={warning.message}>
+                          <Info className="onboarding-option-warning-icon" />
+                        </div>
+                      )}
+                      {hasWarning && isSelected && (
+                        <div className="onboarding-option-warning-selected">
+                          <AlertTriangle className="onboarding-option-warning-selected-icon" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {currentStep === 4 && (
+                  <>
+                    {allergenOptions.map((option) => (
+                      <div key={option.id} onClick={() => toggleSelection(option.id, "allergen")} className={`onboarding-option ${selectedAllergens.includes(option.id) ? "onboarding-option-selected-red" : ""}`}>
+                        <img src={option.image} alt={option.name} className="onboarding-option-image" width="150" height="112" loading="lazy" />
+                        <div className="onboarding-option-overlay"><span className="onboarding-option-name">{option.name}</span></div>
+                        {selectedAllergens.includes(option.id) && (<div className="onboarding-option-check onboarding-option-check-red"><svg className="onboarding-option-check-icon" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg></div>)}
+                      </div>
+                    ))}
+
+                    {/* Others - Add Custom Option */}
+                    <div
+                      onClick={() => setShowCustomInput(showCustomInput === 'allergens' ? null : 'allergens')}
+                      className={`onboarding-option onboarding-option-others ${showCustomInput === 'allergens' ? 'onboarding-option-expanded' : ''} ${customItems.allergens.length > 0 ? 'onboarding-option-has-subs' : ''}`}
+                    >
+                      <div className="onboarding-option-others-content">
+                        <Plus className="onboarding-option-others-icon" />
+                        <span className="onboarding-option-others-text">Others</span>
+                        <span className="onboarding-option-others-hint">Add custom item</span>
+                      </div>
+                      {customItems.allergens.length > 0 && (
+                        <div className="onboarding-option-sub-count">{customItems.allergens.length}</div>
+                      )}
+                    </div>
+
+                    {/* Custom input panel */}
+                    {showCustomInput === 'allergens' && (
+                      <div className="custom-input-panel">
+                        <div className="custom-input-header">
+                          <span className="custom-input-title">Add other allergies or restrictions</span>
+                          <button
+                            className="custom-input-close"
+                            onClick={(e) => { e.stopPropagation(); setShowCustomInput(null); }}
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                        <div className="custom-input-form">
+                          <input
+                            type="text"
+                            value={customInputValue}
+                            onChange={(e) => setCustomInputValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                addCustomItem('allergens');
+                              }
+                            }}
+                            placeholder="Type and press Enter..."
+                            className="custom-input-field"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <button
+                            onClick={(e) => { e.stopPropagation(); addCustomItem('allergens'); }}
+                            className="custom-input-add-btn"
+                            disabled={!customInputValue.trim()}
+                          >
+                            <Plus size={18} />
+                          </button>
+                        </div>
+                        {customItems.allergens.length > 0 && (
+                          <div className="custom-items-list">
+                            {customItems.allergens.map((item, index) => (
+                              <div key={index} className="custom-item-tag">
+                                <span>{item}</span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); removeCustomItem('allergens', item); }}
+                                  className="custom-item-remove"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
             <div className="onboarding-footer">

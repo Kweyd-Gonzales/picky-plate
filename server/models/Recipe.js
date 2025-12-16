@@ -24,7 +24,7 @@ const RecipeSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 
     // 🔑 moderation status
-    state: { type: String, enum: ["active", "forReview"], default: "active", index: true }, // ⬅️ ADD THIS
+    state: { type: String, enum: ["active", "forReview"], default: "active", index: true },
 
     // legacy flags (keep if you still use them elsewhere)
     isFlagged: { type: Boolean, default: false, index: true },
@@ -32,6 +32,25 @@ const RecipeSchema = new mongoose.Schema(
     flaggedAt: { type: Date, default: null },
     flaggedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     deletedAt: { type: Date, default: null },
+
+    // Copyright check result (stored for admin review)
+    copyrightCheck: {
+      riskLevel: {
+        type: String,
+        enum: ["low", "medium", "high", "very_high", "pending"],
+        default: null
+      },
+      matchCount: { type: Number, default: 0 },
+      stockPhotoDetected: { type: Boolean, default: false },
+      matchedUrls: [{ type: String }],
+      recommendation: {
+        type: String,
+        enum: ["approve", "flag_for_review"],
+        default: null
+      },
+      checkedAt: { type: Date, default: null },
+      note: { type: String, default: null }
+    },
   },
   { timestamps: true }
 );

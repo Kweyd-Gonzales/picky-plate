@@ -52,7 +52,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git checkout:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(cat:*)",
+      "Bash(cmd /c del \"c:\\React\\pappy2\\picky-plate\\server\\test-copyright.js\")"
     ],
     "deny": [],
     "ask": []

@@ -1,6 +1,8 @@
 // server/services/imageModeration.js
 // Google Cloud Vision API integration for image moderation (using REST API with API Key)
 
+const { startBackgroundCheck, generateImageHash } = require("./copyrightDetection");
+
 // Get API key at runtime (not at module load time)
 function getApiKey() {
   return process.env.GOOGLE_CLOUD_VISION_API_KEY;
@@ -128,9 +130,13 @@ async function callVisionAPI(imageBase64, features) {
 /**
  * Analyze an image for inappropriate content and food relevance
  * @param {string} imageSource - Base64 image data or URL
+ * @param {Object} options - Optional settings
+ * @param {string} options.userId - User ID for copyright check tracking
+ * @param {boolean} options.skipCopyrightCheck - Skip background copyright check
  * @returns {Object} Analysis result
  */
-async function analyzeImage(imageSource) {
+async function analyzeImage(imageSource, options = {}) {
+  const { userId = null, skipCopyrightCheck = false } = options;
   const apiKey = getApiKey();
 
   // Check if API key is available
@@ -283,6 +289,18 @@ async function analyzeImage(imageSource) {
     // Build response - MUST have food to be approved
     const isApproved = inappropriateFlags.length === 0 && isFoodRelated;
 
+    // Start background copyright check if image is approved
+    let copyrightCheckInfo = null;
+    if (isApproved && !skipCopyrightCheck && apiKey) {
+      try {
+        copyrightCheckInfo = await startBackgroundCheck(base64Data, userId);
+        console.log(`[Image Moderation] Started copyright check: ${copyrightCheckInfo.uploadId}`);
+      } catch (copyrightError) {
+        console.error('[Image Moderation] Failed to start copyright check:', copyrightError.message);
+        // Don't fail the validation, just log the error
+      }
+    }
+
     return {
       success: true,
       approved: isApproved,
@@ -293,7 +311,13 @@ async function analyzeImage(imageSource) {
       hasNonFoodItems,
       foodLabels: foodLabels.map(l => l.description),
       allLabels: detectedLabels.slice(0, 10).map(l => l.description),
-      message: generateMessage(inappropriateFlags, isFoodRelated, hasNonFoodItems)
+      message: generateMessage(inappropriateFlags, isFoodRelated, hasNonFoodItems),
+      // Copyright check info for frontend polling
+      copyrightCheck: copyrightCheckInfo ? {
+        uploadId: copyrightCheckInfo.uploadId,
+        imageHash: copyrightCheckInfo.imageHash,
+        reused: copyrightCheckInfo.reused
+      } : null
     };
 
   } catch (error) {
@@ -378,6 +402,7 @@ async function quickSafetyCheck(imageSource) {
 module.exports = {
   analyzeImage,
   quickSafetyCheck,
+  generateImageHash,
   LIKELIHOOD_ORDER,
   FOOD_RELATED_LABELS
 };

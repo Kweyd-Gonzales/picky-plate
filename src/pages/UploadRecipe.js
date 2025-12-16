@@ -1,5 +1,5 @@
 // client/src/pages/UploadRecipe.js
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, X, Camera, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useAuth } from '../auth/AuthContext';
@@ -24,6 +24,129 @@ const COOK_TIME_OPTIONS = [
 ];
 
 const SERVING_SIZE_OPTIONS = ["1","1-2","3-4","5-6","7-8","9+"];
+
+// ============================================================
+// COPYRIGHT STATUS BANNER COMPONENT
+// Displays the copyright check status with appropriate styling
+// ============================================================
+const CopyrightStatusBanner = ({ status, result, uploadId }) => {
+  // Always log when this renders for debugging
+  console.log('[CopyrightStatusBanner] Rendering with:', { status, result, uploadId });
+
+  // If no uploadId, don't render anything
+  if (!uploadId) {
+    return null;
+  }
+
+  // SCANNING STATE - Blue pulsing banner
+  if (status === 'pending' || status === 'processing' || !status) {
+    return (
+      <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg animate-pulse">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🔍</span>
+          <div>
+            <p className="text-sm font-medium text-blue-800">Checking image originality...</p>
+            <p className="text-xs text-blue-600">This helps protect creators' rights</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // COMPLETE - Show result based on risk level
+  if (status === 'complete' && result) {
+    // LOW RISK - Green success
+    if (result.riskLevel === 'low') {
+      return (
+        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">✅</span>
+            <div>
+              <p className="text-sm font-medium text-green-800">Image appears to be original</p>
+              <p className="text-xs text-green-600">No copyright concerns detected</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // MEDIUM RISK - Yellow warning
+    if (result.riskLevel === 'medium') {
+      return (
+        <div className="mt-3 p-3 bg-yellow-50 border border-yellow-300 rounded-lg">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">⚠️</span>
+            <div>
+              <p className="text-sm font-medium text-yellow-800">
+                Image found on {result.matchCount || 'some'} website(s)
+              </p>
+              <p className="text-xs text-yellow-700">May require review - please ensure you have rights to use this image</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // HIGH RISK - Orange/Amber strong warning
+    if (result.riskLevel === 'high') {
+      return (
+        <div className="mt-3 p-4 bg-amber-50 border-2 border-amber-400 rounded-lg shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">🚫</span>
+            <div>
+              <p className="text-sm font-bold text-amber-800">
+                Potential Copyright Issue Detected
+              </p>
+              <p className="text-xs text-amber-700 mt-1">
+                This image was found on {result.matchCount || 'multiple'} recipe website(s).
+                It may be copyrighted.
+              </p>
+              <p className="text-xs text-amber-600 mt-2 font-medium">
+                ⚠️ Please use your own original photo to avoid issues
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // VERY HIGH RISK - Red severe warning
+    if (result.riskLevel === 'very_high') {
+      return (
+        <div className="mt-3 p-4 bg-red-50 border-2 border-red-400 rounded-lg shadow-md">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">🛑</span>
+            <div>
+              <p className="text-sm font-bold text-red-800">
+                Stock Photo Detected - Likely Copyrighted
+              </p>
+              <p className="text-xs text-red-700 mt-1">
+                This image appears to be from a stock photo website and is likely copyrighted.
+              </p>
+              <p className="text-xs text-red-600 mt-2 font-medium">
+                🚫 Please replace with your own original photo
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+  }
+
+  // ERROR/EXPIRED STATE
+  if (status === 'error' || status === 'expired') {
+    return (
+      <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">⏱️</span>
+          <p className="text-sm text-gray-600">Copyright check unavailable - proceeding with upload</p>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
 
 export default function UploadRecipe() {
   const { isAuthenticated, authHeaders } = useAuth();
@@ -50,6 +173,11 @@ export default function UploadRecipe() {
   const [imageValidation, setImageValidation] = useState(null); // { approved, message, details }
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Copyright check states (SIMPLE VERSION)
+  const [copyrightUploadId, setCopyrightUploadId] = useState(null);
+  const [copyrightStatus, setCopyrightStatus] = useState(null); // 'pending' | 'processing' | 'complete' | 'expired'
+  const [copyrightResult, setCopyrightResult] = useState(null);
+
   const addIngredient = () => setIngredients([...ingredients, '']);
   const removeIngredient = (index) => {
     if (ingredients.length > 1) setIngredients(ingredients.filter((_, i) => i !== index));
@@ -73,6 +201,108 @@ export default function UploadRecipe() {
     setSelectedAllergens((prev) => prev.includes(a) ? prev.filter(t => t !== a) : [...prev, a]);
   };
 
+  // ============================================================
+  // COPYRIGHT POLLING EFFECT
+  // Polls the backend every 2 seconds when uploadId is set
+  // Shows browser alert for HIGH/VERY_HIGH risk (impossible to miss!)
+  // ============================================================
+  useEffect(() => {
+    console.log('=== COPYRIGHT POLLING EFFECT ===');
+    console.log('copyrightUploadId:', copyrightUploadId);
+
+    if (!copyrightUploadId) {
+      console.log('No uploadId, skipping polling');
+      return;
+    }
+
+    let isCancelled = false;
+    let pollCount = 0;
+    const MAX_POLLS = 30; // 60 seconds max
+
+    const pollCopyrightStatus = async () => {
+      if (isCancelled) return;
+
+      pollCount++;
+      console.log(`[Copyright Poll #${pollCount}] Checking status for: ${copyrightUploadId}`);
+
+      try {
+        const headers = { "Content-Type": "application/json" };
+        if (isAuthenticated) Object.assign(headers, authHeaders());
+
+        const response = await fetch(`http://localhost:4000/api/recipes/copyright-status/${copyrightUploadId}`, {
+          method: "GET",
+          headers,
+        });
+        const data = await response.json();
+
+        console.log(`[Copyright Poll #${pollCount}] Response:`, data);
+
+        if (isCancelled) return;
+
+        if (data.status === 'complete' || (data.success && data.status === 'complete')) {
+          console.log('=== COPYRIGHT CHECK COMPLETE ===', data.result);
+          setCopyrightStatus('complete');
+          setCopyrightResult(data.result);
+
+          // Show browser alert for HIGH/VERY_HIGH risk (impossible to miss!)
+          if (data.result?.riskLevel === 'high' || data.result?.riskLevel === 'very_high') {
+            const matchCount = data.result?.matchCount || 'multiple';
+            const isStockPhoto = data.result?.riskLevel === 'very_high';
+
+            alert(
+              `⚠️ COPYRIGHT WARNING\n\n` +
+              `${isStockPhoto ? 'This appears to be a stock photo!' : 'This image was found on ' + matchCount + ' website(s).'}\n\n` +
+              `It may be copyrighted. Please consider using your own original photo.\n\n` +
+              `You can still submit, but your recipe may be flagged for review.`
+            );
+          }
+          return; // Stop polling
+        }
+
+        if (data.status === 'error') {
+          console.log('Copyright check error:', data.error);
+          setCopyrightStatus('error');
+          return; // Stop polling
+        }
+
+        if (data.status === 'not_found') {
+          console.log('Copyright check not found');
+          setCopyrightStatus('expired');
+          return; // Stop polling
+        }
+
+        // Still pending/processing - continue polling
+        setCopyrightStatus(data.status || 'pending');
+
+        if (pollCount < MAX_POLLS) {
+          setTimeout(pollCopyrightStatus, 2000);
+        } else {
+          console.log('Max polls reached, stopping');
+          setCopyrightStatus('error');
+        }
+
+      } catch (error) {
+        console.error('[Copyright Poll] Error:', error);
+        if (!isCancelled && pollCount < 3) {
+          // Retry a few times on network errors
+          setTimeout(pollCopyrightStatus, 2000);
+        } else {
+          setCopyrightStatus('error');
+        }
+      }
+    };
+
+    // Start polling
+    setCopyrightStatus('pending');
+    pollCopyrightStatus();
+
+    // Cleanup function
+    return () => {
+      console.log('Cleaning up copyright polling');
+      isCancelled = true;
+    };
+  }, [copyrightUploadId, isAuthenticated, authHeaders]);
+
   const validateImage = async (imageData) => {
     if (!imageData) return;
 
@@ -91,12 +321,25 @@ export default function UploadRecipe() {
 
       const data = await res.json();
 
+      // SIMPLE: Log what we received and set the uploadId to trigger polling
+      console.log('=== VALIDATE IMAGE RESPONSE ===');
+      console.log('approved:', data.approved);
+      console.log('copyrightCheck:', data.copyrightCheck);
+
       setImageValidation({
         approved: data.approved,
         message: data.message,
         details: data.details || {},
         skipped: data.skipped
       });
+
+      // SIMPLE: Just set the uploadId - the useEffect will handle polling
+      if (data.copyrightCheck?.uploadId) {
+        console.log('=== SETTING UPLOAD ID ===', data.copyrightCheck.uploadId);
+        setCopyrightUploadId(data.copyrightCheck.uploadId);
+      } else {
+        console.log('=== NO UPLOAD ID IN RESPONSE ===');
+      }
 
       // If image is not approved, show alert
       if (!data.approved && !data.skipped) {
@@ -238,6 +481,10 @@ export default function UploadRecipe() {
   const clearImage = () => {
     setImage(null);
     setImageValidation(null);
+    // Clear copyright check state (setting to null stops the useEffect polling)
+    setCopyrightUploadId(null);
+    setCopyrightStatus(null);
+    setCopyrightResult(null);
   };
 
   const validate = () => {
@@ -295,7 +542,9 @@ export default function UploadRecipe() {
       notes: personalNotes.trim(),
       servings,
       tags: selectedTags,
-      allergens: selectedAllergens
+      allergens: selectedAllergens,
+      // Include copyright check ID for backend verification
+      copyrightUploadId: copyrightUploadId || null
     };
 
     try {
@@ -360,6 +609,12 @@ export default function UploadRecipe() {
             Add <span className="text-[#FFBF00]">A</span> Plate
           </h1>
           <p className="text-center text-[#92400E] mb-8">Share your culinary creation with the community</p>
+
+          {/* TEMPORARY DEBUG BANNER - Remove after confirming copyright UI works */}
+          <div className="bg-purple-600 text-white p-2 text-xs font-mono rounded mb-4">
+            DEBUG: uploadId={copyrightUploadId || 'null'} | status={copyrightStatus || 'null'} |
+            result={copyrightResult ? copyrightResult.riskLevel : 'null'}
+          </div>
 
           {/* Dish Name */}
           <div className="mb-6">
@@ -487,6 +742,13 @@ export default function UploadRecipe() {
                   )}
                 </div>
               )}
+
+              {/* COPYRIGHT STATUS BANNER - Using the dedicated component */}
+              <CopyrightStatusBanner
+                status={copyrightStatus}
+                result={copyrightResult}
+                uploadId={copyrightUploadId}
+              />
 
               {/* Detected food labels */}
               {imageValidation?.details?.foodLabels?.length > 0 && (

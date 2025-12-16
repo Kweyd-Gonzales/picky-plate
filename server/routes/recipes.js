@@ -2,8 +2,13 @@
 const express = require("express");
 const Recipe = require("../models/Recipe");
 const { protect } = require("../middleware/auth");
-const { analyzeImage, quickSafetyCheck } = require("../services/imageModeration");
+const { analyzeImage, quickSafetyCheck, generateImageHash } = require("../services/imageModeration");
 const { analyzeRecipeText, quickSpamCheck } = require("../utils/spamDetection");
+const {
+  getCheckStatus,
+  getCheckByUploadId,
+  getCheckByImageHash
+} = require("../services/copyrightDetection");
 
 const router = express.Router();
 const RecipeReport = require('../models/RecipeReport');
@@ -250,8 +255,10 @@ router.post("/validate-image", protect, async (req, res) => {
       });
     }
 
-    // Analyze the image
-    const result = await analyzeImage(image);
+    // Analyze the image (includes background copyright check)
+    const result = await analyzeImage(image, {
+      userId: req.user?._id || req.user?.id || null
+    });
 
     if (!result.success) {
       return res.status(500).json({
@@ -260,6 +267,13 @@ router.post("/validate-image", protect, async (req, res) => {
         message: result.message || "Image analysis failed"
       });
     }
+
+    // DEBUG: Log what we're sending back
+    console.log('[validate-image] Sending response:', {
+      approved: result.approved,
+      copyrightCheck: result.copyrightCheck,
+      hasCopyrightCheck: !!result.copyrightCheck
+    });
 
     res.json({
       success: true,
@@ -271,7 +285,9 @@ router.post("/validate-image", protect, async (req, res) => {
         isFoodRelated: result.isFoodRelated,
         foodLabels: result.foodLabels,
         detectedLabels: result.allLabels
-      }
+      },
+      // Include copyright check info for frontend polling
+      copyrightCheck: result.copyrightCheck || null
     });
 
   } catch (error) {
@@ -326,6 +342,52 @@ router.post("/quick-safety-check", protect, async (req, res) => {
 });
 
 /**
+ * GET /api/recipes/copyright-status/:uploadId
+ * Check the status of a background copyright check
+ * Returns: { status: 'pending' | 'processing' | 'complete' | 'error', result: copyrightAssessment }
+ */
+router.get("/copyright-status/:uploadId", protect, async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+
+    if (!uploadId || !uploadId.startsWith("cr_")) {
+      return res.status(400).json({
+        success: false,
+        status: "invalid",
+        message: "Invalid upload ID format"
+      });
+    }
+
+    const checkStatus = await getCheckStatus(uploadId);
+
+    if (checkStatus.status === "not_found") {
+      return res.status(404).json({
+        success: false,
+        status: "not_found",
+        message: "Copyright check not found or expired"
+      });
+    }
+
+    res.json({
+      success: true,
+      status: checkStatus.status,
+      result: checkStatus.result,
+      error: checkStatus.error,
+      createdAt: checkStatus.createdAt,
+      completedAt: checkStatus.completedAt
+    });
+
+  } catch (error) {
+    console.error("Copyright status check error:", error);
+    res.status(500).json({
+      success: false,
+      status: "error",
+      message: "Failed to check copyright status"
+    });
+  }
+});
+
+/**
  * POST /api/recipes
  * Requires auth
  * Includes anti-spam validation
@@ -353,6 +415,7 @@ router.post("/", protect, async (req, res) => {
       instructions = [],
       tags = [],
       allergens = [],
+      copyrightUploadId = null, // From frontend copyright check
     } = req.body;
 
     if (!title) return res.status(400).json({ success: false, error: "title_required" });
@@ -382,6 +445,51 @@ router.post("/", protect, async (req, res) => {
       });
     }
 
+    // Check copyright status if image is provided
+    let copyrightCheckResult = null;
+    let copyrightFlagged = false;
+
+    if (image && copyrightUploadId) {
+      // Try to get copyright check by uploadId
+      const copyrightCheck = await getCheckByUploadId(copyrightUploadId);
+
+      if (copyrightCheck) {
+        if (copyrightCheck.status === "complete" && copyrightCheck.result) {
+          copyrightCheckResult = copyrightCheck.result;
+          // Flag if high or very_high risk
+          if (["high", "very_high"].includes(copyrightCheck.result.riskLevel)) {
+            copyrightFlagged = true;
+            console.log('[Recipe Create] Copyright flagged:', {
+              userId: req.user?._id || req.user?.id,
+              riskLevel: copyrightCheck.result.riskLevel,
+              matchCount: copyrightCheck.result.matchCount,
+              matchedUrls: copyrightCheck.result.matchedUrls?.slice(0, 3)
+            });
+          }
+        } else if (copyrightCheck.status === "pending" || copyrightCheck.status === "processing") {
+          // Check not complete yet - flag for review to be safe
+          copyrightFlagged = true;
+          copyrightCheckResult = { riskLevel: "pending", note: "Check incomplete at submission time" };
+          console.log('[Recipe Create] Copyright check incomplete, flagging for review:', {
+            userId: req.user?._id || req.user?.id,
+            status: copyrightCheck.status
+          });
+        }
+      } else if (image) {
+        // No copyright check found but image present - try by hash
+        const base64Data = image.startsWith("data:image") ? image.split(",")[1] : image;
+        const imageHash = generateImageHash(base64Data);
+        const hashCheck = await getCheckByImageHash(imageHash);
+
+        if (hashCheck?.status === "complete" && hashCheck.result) {
+          copyrightCheckResult = hashCheck.result;
+          if (["high", "very_high"].includes(hashCheck.result.riskLevel)) {
+            copyrightFlagged = true;
+          }
+        }
+      }
+    }
+
     const cleanTags = (Array.isArray(tags) ? tags : String(tags).split(","))
       .map((t) => String(t).trim().toLowerCase())
       .filter(Boolean);
@@ -390,16 +498,18 @@ router.post("/", protect, async (req, res) => {
       .map((a) => String(a).trim().toLowerCase())
       .filter(Boolean);
 
-    // Determine initial state based on spam analysis
-    // If borderline suspicious, flag for review instead of immediate publish
-    const initialState = spamAnalysis.shouldFlag ? "forReview" : "active";
-    const shouldFlag = spamAnalysis.shouldFlag;
+    // Determine initial state based on spam AND copyright analysis
+    const shouldFlagForSpam = spamAnalysis.shouldFlag;
+    const shouldFlag = shouldFlagForSpam || copyrightFlagged;
+    const initialState = shouldFlag ? "forReview" : "active";
 
     if (shouldFlag) {
       console.log('[Recipe Create] Flagged for review:', {
         userId: req.user?._id || req.user?.id,
-        score: spamAnalysis.score,
-        reasons: spamAnalysis.reasons
+        spamScore: spamAnalysis.score,
+        spamReasons: spamAnalysis.reasons,
+        copyrightFlagged,
+        copyrightRiskLevel: copyrightCheckResult?.riskLevel
       });
     }
 
@@ -421,16 +531,31 @@ router.post("/", protect, async (req, res) => {
       state: initialState,
       isFlagged: shouldFlag,
       flaggedAt: shouldFlag ? new Date() : null,
+      // Store copyright check result for admin review
+      copyrightCheck: copyrightCheckResult ? {
+        riskLevel: copyrightCheckResult.riskLevel,
+        matchCount: copyrightCheckResult.matchCount || 0,
+        stockPhotoDetected: copyrightCheckResult.stockPhotoDetected || false,
+        matchedUrls: copyrightCheckResult.matchedUrls || [],
+        recommendation: copyrightCheckResult.recommendation,
+        checkedAt: new Date()
+      } : null,
     });
+
+    // Build response message
+    let message;
+    if (copyrightFlagged) {
+      message = "Recipe submitted for review due to potential copyright concerns. It will be visible once approved.";
+    } else if (shouldFlagForSpam) {
+      message = "Recipe submitted for review. It will be visible once approved.";
+    }
 
     res.status(201).json({
       success: true,
       recipe: doc,
-      // Let the user know if their recipe is pending review
       pendingReview: shouldFlag,
-      message: shouldFlag
-        ? "Recipe submitted for review. It will be visible once approved."
-        : undefined
+      copyrightFlagged,
+      message
     });
   } catch (e) {
     console.error("create_recipe_error:", e);
