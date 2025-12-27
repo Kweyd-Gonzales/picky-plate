@@ -1,0 +1,195 @@
+/* src/pages/LegalPages.css */
+/* Styles for Terms and Privacy pages */
+
+.legal-page-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: linear-gradient(to bottom, #fefce8, #ffffff);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Custom scrollbar */
+.legal-page-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.legal-page-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.legal-page-container::-webkit-scrollbar-thumb {
+  background: #FFC42D;
+  border-radius: 4px;
+}
+
+.legal-page-container::-webkit-scrollbar-thumb:hover {
+  background: #FFB800;
+}
+
+/* ========== MOBILE RESPONSIVE ========== */
+
+/* Tablet */
+@media (max-width: 768px) {
+  .legal-page-container .max-w-4xl {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .legal-page-container .py-12 {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+  }
+
+  .legal-page-container .text-3xl {
+    font-size: 1.5rem;
+  }
+
+  .legal-page-container .sm\:text-4xl {
+    font-size: 1.75rem;
+  }
+
+  .legal-page-container .p-6 {
+    padding: 1rem;
+  }
+
+  .legal-page-container .sm\:p-10 {
+    padding: 1.5rem;
+  }
+}
+
+/* Mobile */
+@media (max-width: 480px) {
+  .legal-page-container .py-12 {
+    padding-top: 1.5rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .legal-page-container .px-4 {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .legal-page-container .text-3xl,
+  .legal-page-container .sm\:text-4xl {
+    font-size: 1.35rem;
+  }
+
+  .legal-page-container .text-xl {
+    font-size: 1.1rem;
+  }
+
+  .legal-page-container .w-10 {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .legal-page-container .gap-3 {
+    gap: 0.5rem;
+  }
+
+  .legal-page-container .mb-6 {
+    margin-bottom: 1rem;
+  }
+
+  .legal-page-container .mb-4 {
+    margin-bottom: 0.75rem;
+  }
+
+  .legal-page-container .space-y-8 > * + * {
+    margin-top: 1.5rem;
+  }
+
+  .legal-page-container .p-6,
+  .legal-page-container .sm\:p-10 {
+    padding: 1rem;
+  }
+
+  .legal-page-container .rounded-2xl {
+    border-radius: 1rem;
+  }
+
+  .legal-page-container .text-gray-600 {
+    font-size: 0.9rem;
+  }
+
+  .legal-page-container ul {
+    padding-left: 1rem;
+  }
+
+  .legal-page-container li {
+    font-size: 0.85rem;
+  }
+
+  /* Back button styling for mobile */
+  .legal-page-container .inline-flex {
+    font-size: 0.85rem;
+  }
+
+  .legal-page-container .w-4 {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  /* Footer links */
+  .legal-page-container .pt-8 {
+    padding-top: 1.5rem;
+  }
+
+  .legal-page-container .gap-4 {
+    gap: 0.75rem;
+  }
+}
+
+/* Very small screens */
+@media (max-width: 360px) {
+  .legal-page-container .px-4 {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .legal-page-container .p-6,
+  .legal-page-container .sm\:p-10 {
+    padding: 0.75rem;
+  }
+
+  .legal-page-container .text-3xl,
+  .legal-page-container .sm\:text-4xl {
+    font-size: 1.2rem;
+  }
+
+  .legal-page-container .text-xl {
+    font-size: 1rem;
+  }
+
+  .legal-page-container .text-gray-600,
+  .legal-page-container li {
+    font-size: 0.8rem;
+  }
+}
+
+/* Landscape mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .legal-page-container .py-12 {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .legal-page-container .space-y-8 > * + * {
+    margin-top: 1rem;
+  }
+}
+
+/* Safe area for notched phones */
+@supports (padding: max(0px)) {
+  .legal-page-container {
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}

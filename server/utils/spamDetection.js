@@ -115,9 +115,12 @@ function analyzeRecipeText(recipe) {
     reasons.push('Content too short overall');
   }
 
-  // Determine spam status (threshold: 40)
-  const isSpam = score >= 40;
-  const shouldFlag = score >= 25; // Flag for review if borderline
+  // Determine spam status
+  // isSpam (score >= 50): Hard reject - obvious spam
+  // shouldFlag (score >= 40): Flag for admin review - suspicious content
+  // Below 40: Allow immediately - clean or just low quality (frontend validation handles quality)
+  const isSpam = score >= 50;
+  const shouldFlag = score >= 40; // Only flag for review if clearly suspicious
 
   return {
     isSpam,

@@ -747,3 +747,49 @@ body.mobile-menu-open {
     transform: scale(0.9);
   }
 }
+
+/* ========== FOOTER LINKS (Terms & Privacy) ========== */
+.pap-sidebar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 196, 45, 0.2);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.pap-sidebar.is-expanded .pap-sidebar-footer,
+.pap-sidebar.mobile-open .pap-sidebar-footer {
+  opacity: 1;
+}
+
+.pap-footer-link {
+  font-size: 0.75rem;
+  color: var(--pap-muted);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.pap-footer-link:hover {
+  color: var(--pap-orange);
+}
+
+.pap-footer-divider {
+  color: rgba(126, 126, 126, 0.5);
+  font-size: 0.6rem;
+}
+
+/* Mobile: always show footer */
+@media (max-width: 900px) {
+  .pap-sidebar-footer {
+    opacity: 1;
+    padding: 16px;
+  }
+
+  .pap-footer-link {
+    font-size: 0.85rem;
+  }
+}

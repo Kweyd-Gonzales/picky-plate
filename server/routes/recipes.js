@@ -41,6 +41,17 @@ function escapeRegExp(str = "") {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Calculate similarity between two strings (Jaccard similarity on words)
+function calculateSimilarity(str1, str2) {
+  if (!str1 || !str2) return 0;
+  const words1 = new Set(str1.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  const words2 = new Set(str2.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  if (words1.size === 0 || words2.size === 0) return 0;
+  const intersection = [...words1].filter(w => words2.has(w)).length;
+  const union = new Set([...words1, ...words2]).size;
+  return intersection / union;
+}
+
 /**
  * GET /api/recipes
  * Optional query:
@@ -443,6 +454,64 @@ router.post("/", protect, async (req, res) => {
         error: "Recipe submission flagged as spam. Please ensure your recipe includes meaningful content.",
         details: spamAnalysis.reasons
       });
+    }
+
+    // ========== DUPLICATE RECIPE DETECTION ==========
+    // Check if a similar recipe already exists in the database
+    const cleanIngredientsArr = (Array.isArray(ingredients) ? ingredients : []).map(i => String(i).trim().toLowerCase()).filter(Boolean);
+    const cleanInstructionsArr = (Array.isArray(instructions) ? instructions : []).map(i => String(i).trim().toLowerCase()).filter(Boolean);
+    const ingredientsText = cleanIngredientsArr.join(' ');
+    const instructionsText = cleanInstructionsArr.join(' ');
+
+    // Search for recipes with same title (exact match)
+    const exactTitleMatch = await Recipe.findOne({
+      title: new RegExp(`^${escapeRegExp(title.trim())}$`, 'i'),
+      state: { $ne: 'deleted' }
+    });
+
+    if (exactTitleMatch) {
+      console.log('[Recipe Create] Duplicate title detected:', {
+        userId: req.user?._id || req.user?.id,
+        title,
+        existingRecipeId: exactTitleMatch._id
+      });
+      return res.status(400).json({
+        success: false,
+        error: `A recipe with the title "${title}" already exists. Please use a different name or check if your recipe was already uploaded.`
+      });
+    }
+
+    // Check for similar content (same ingredients + instructions)
+    if (cleanIngredientsArr.length > 0 && cleanInstructionsArr.length > 0) {
+      // Get recent recipes to compare against (limit to last 500 for performance)
+      const recentRecipes = await Recipe.find(
+        { state: { $ne: 'deleted' } },
+        { ingredients: 1, instructions: 1, title: 1 }
+      ).sort({ createdAt: -1 }).limit(500).lean();
+
+      for (const existingRecipe of recentRecipes) {
+        const existingIngredients = (existingRecipe.ingredients || []).map(i => String(i).trim().toLowerCase()).join(' ');
+        const existingInstructions = (existingRecipe.instructions || []).map(i => String(i).trim().toLowerCase()).join(' ');
+
+        // Check similarity
+        const ingredientsSimilar = existingIngredients && ingredientsText &&
+          (existingIngredients === ingredientsText || calculateSimilarity(existingIngredients, ingredientsText) > 0.85);
+        const instructionsSimilar = existingInstructions && instructionsText &&
+          (existingInstructions === instructionsText || calculateSimilarity(existingInstructions, instructionsText) > 0.85);
+
+        if (ingredientsSimilar && instructionsSimilar) {
+          console.log('[Recipe Create] Duplicate content detected:', {
+            userId: req.user?._id || req.user?.id,
+            newTitle: title,
+            existingTitle: existingRecipe.title,
+            existingRecipeId: existingRecipe._id
+          });
+          return res.status(400).json({
+            success: false,
+            error: `This recipe appears to be very similar to "${existingRecipe.title}". Please submit original content or modify your recipe significantly.`
+          });
+        }
+      }
     }
 
     // Check copyright status if image is provided

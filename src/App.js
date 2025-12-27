@@ -1,10 +1,11 @@
-import React, { Suspense, lazy } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import React, { Suspense, lazy, useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import MainLayout from "./layouts/MainLayout";
 import { AuthProvider } from "./auth/AuthContext";
 import RoleRoute, { GuestOnlyRoute } from "./auth/RoleRoute";
 import LoadingModal from "./components/LoadingModal";
 import ErrorBoundary from "./components/ErrorBoundary";
+import TermsConsentModal, { useTermsConsent } from "./components/TermsConsentModal";
 import "./index.css";
 
 // Lazy load all pages for code splitting - reduces initial bundle size by ~70%
@@ -21,16 +22,45 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const CommunityRecipes = lazy(() => import("./pages/Recipe"));
 const Calendar = lazy(() => import("./pages/Calendar"));
 const VerifyOtp = lazy(() => import("./pages/VerifyOtp"));
+const TermsAndConditions = lazy(() => import("./pages/TermsAndConditions"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
 
-export default function App() {
+// Inner component to handle consent modal (needs to be inside BrowserRouter)
+function AppContent() {
+  const location = useLocation();
+  const { hasConsent, grantConsent } = useTermsConsent();
+  const [showConsentModal, setShowConsentModal] = useState(false);
+
+  // Check if we're on a legal page (don't show consent modal on terms/privacy pages)
+  const isLegalPage = location.pathname === "/terms" || location.pathname === "/privacy";
+
+  useEffect(() => {
+    // Show consent modal if user hasn't accepted and not on legal pages
+    if (!hasConsent && !isLegalPage) {
+      setShowConsentModal(true);
+    } else {
+      setShowConsentModal(false);
+    }
+  }, [hasConsent, isLegalPage]);
+
+  const handleAcceptConsent = () => {
+    grantConsent();
+    setShowConsentModal(false);
+  };
+
   return (
-    <ErrorBoundary>
-      <BrowserRouter>
-        <AuthProvider>
-          <Suspense fallback={<LoadingModal message="Loading..." />}>
-            <Routes>
-            {/* ✅ All routes WITH Sidebar via MainLayout */}
-            <Route element={<MainLayout />}>
+    <>
+      {/* Terms Consent Modal - Shows on first visit */}
+      <TermsConsentModal
+        isOpen={showConsentModal}
+        onAccept={handleAcceptConsent}
+        showCloseButton={false}
+      />
+
+      <Suspense fallback={<LoadingModal message="Loading..." />}>
+        <Routes>
+          {/* ✅ All routes WITH Sidebar via MainLayout */}
+          <Route element={<MainLayout />}>
             {/* 🌐 PUBLIC ROUTES - No login required */}
             <Route path="/" element={<Dashboard />} />
             <Route path="/chatbot" element={<ChatBot />} />
@@ -38,7 +68,7 @@ export default function App() {
             <Route path="/barkada-vote" element={<BarkadaVote />} />
             <Route path="/explorer" element={<Explorer />} />
             <Route path="/restaurants" element={<RestaurantLocator />} />
-            <Route path="/verify-otp" element={<VerifyOtp />} /> {/* ✅ OTP page */}
+            <Route path="/verify-otp" element={<VerifyOtp />} />
 
             {/* 🔒 PROTECTED ROUTES - Login required */}
             <Route
@@ -91,10 +121,24 @@ export default function App() {
             <Route path="/forgot-password" element={<ForgotPassword />} />
           </Route>
 
-              {/* Catch-all route */}
-              <Route path="*" element={<div>Not Found</div>} />
-            </Routes>
-          </Suspense>
+          {/* Legal Pages - Outside MainLayout (no sidebar) */}
+          <Route path="/terms" element={<TermsAndConditions />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+
+          {/* Catch-all route */}
+          <Route path="*" element={<div>Not Found</div>} />
+        </Routes>
+      </Suspense>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppContent />
         </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>

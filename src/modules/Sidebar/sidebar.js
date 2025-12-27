@@ -153,6 +153,13 @@ const Sidebar = () => {
             </>
           )}
         </div>
+
+        {/* Footer Links */}
+        <div className="pap-sidebar-footer">
+          <Link to="/terms" className="pap-footer-link" onClick={closeMobileMenu}>Terms</Link>
+          <span className="pap-footer-divider">•</span>
+          <Link to="/privacy" className="pap-footer-link" onClick={closeMobileMenu}>Privacy</Link>
+        </div>
       </aside>
     </>
   );

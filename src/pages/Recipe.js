@@ -162,6 +162,9 @@ export default function CommunityRecipes() {
   const [uploadCopyrightStatus, setUploadCopyrightStatus] = useState(null);
   const [uploadCopyrightResult, setUploadCopyrightResult] = useState(null);
 
+  // Original content confirmation
+  const [confirmsOriginalContent, setConfirmsOriginalContent] = useState(false);
+
   // NEW: Favorites/Bookmarks (local storage for demo)
   const [favorites, setFavorites] = useState(() => {
     try {
@@ -1277,6 +1280,8 @@ export default function CommunityRecipes() {
     setUploadCopyrightId(null);
     setUploadCopyrightStatus(null);
     setUploadCopyrightResult(null);
+    // Reset original content confirmation
+    setConfirmsOriginalContent(false);
   };
 
   // Copyright polling effect for upload modal
@@ -1496,8 +1501,12 @@ export default function CommunityRecipes() {
 
   const validateUploadForm = () => {
     const errs = [];
-    if (!uploadForm.title.trim()) errs.push("Dish name is required");
-    if (!uploadForm.description.trim()) errs.push("Description is required");
+    const title = uploadForm.title.trim();
+    const description = uploadForm.description.trim();
+
+    // Basic required field checks
+    if (!title) errs.push("Dish name is required");
+    if (!description) errs.push("Description is required");
 
     const cleanIngredients = uploadForm.ingredients.map(s => s.trim()).filter(Boolean);
     if (cleanIngredients.length === 0) errs.push("At least one ingredient is required");
@@ -1509,6 +1518,164 @@ export default function CommunityRecipes() {
     if (!uploadForm.cookTime) errs.push("Cook time is required");
     if (!uploadForm.servings) errs.push("Serving size is required");
     if (!uploadForm.difficulty) errs.push("Difficulty is required");
+
+    // ========== CONTENT QUALITY VALIDATION ==========
+    // Title validation
+    if (title && title.length < 3) {
+      errs.push("Dish name must be at least 3 characters");
+    }
+    if (title && title.length > 100) {
+      errs.push("Dish name must be less than 100 characters");
+    }
+
+    // Description validation - require meaningful content
+    if (description && description.length < 20) {
+      errs.push("Description must be at least 20 characters - please describe your dish");
+    }
+    if (description && description.length > 1000) {
+      errs.push("Description must be less than 1000 characters");
+    }
+
+    // Instructions validation - each step should have meaningful content
+    if (cleanInstructions.length > 0) {
+      const shortInstructions = cleanInstructions.filter(inst => inst.length < 10);
+      if (shortInstructions.length > 0) {
+        errs.push("Each instruction step should be at least 10 characters - please provide clear steps");
+      }
+
+      // Check total instruction content length
+      const totalInstructionLength = cleanInstructions.join(' ').length;
+      if (totalInstructionLength < 50) {
+        errs.push("Instructions seem too brief - please provide more detailed cooking steps");
+      }
+    }
+
+    // Ingredients validation - each should be meaningful
+    if (cleanIngredients.length > 0) {
+      const shortIngredients = cleanIngredients.filter(ing => ing.length < 3);
+      if (shortIngredients.length > 0) {
+        errs.push("Each ingredient should be at least 3 characters");
+      }
+    }
+
+    // Check for suspicious patterns (common copy-paste indicators)
+    const allText = `${title} ${description} ${cleanInstructions.join(' ')}`.toLowerCase();
+
+    // Check for URLs (possible copy-paste from websites)
+    if (/https?:\/\/|www\./i.test(allText)) {
+      errs.push("Please remove any URLs - write the recipe in your own words");
+    }
+
+    // Check for copyright notices
+    if (/©|copyright|all rights reserved/i.test(allText)) {
+      errs.push("Content appears to contain copyright notices - please use original content only");
+    }
+
+    // ========== SPAM/REPETITIVE CONTENT DETECTION ==========
+    // Helper function to detect repetitive patterns
+    const hasRepetitivePattern = (text) => {
+      if (!text || text.length < 10) return false;
+      const cleaned = text.toLowerCase().replace(/\s+/g, '');
+      // Check if text is just repeating a short pattern (e.g., "samplesamplesample")
+      for (let len = 2; len <= Math.min(10, Math.floor(cleaned.length / 2)); len++) {
+        const pattern = cleaned.substring(0, len);
+        const repeated = pattern.repeat(Math.ceil(cleaned.length / len)).substring(0, cleaned.length);
+        if (repeated === cleaned) return true;
+      }
+      // Check if most characters are the same (e.g., "aaaaaaa")
+      const charCounts = {};
+      for (const char of cleaned) {
+        charCounts[char] = (charCounts[char] || 0) + 1;
+      }
+      const maxCount = Math.max(...Object.values(charCounts));
+      if (maxCount / cleaned.length > 0.7) return true;
+      return false;
+    };
+
+    // Check description for spam
+    if (description && hasRepetitivePattern(description)) {
+      errs.push("Description appears to contain repetitive/spam content - please write a real description");
+    }
+
+    // Check instructions for spam
+    for (let i = 0; i < cleanInstructions.length; i++) {
+      if (hasRepetitivePattern(cleanInstructions[i])) {
+        errs.push(`Instruction step ${i + 1} appears to contain repetitive/spam content`);
+        break; // Only show one error
+      }
+    }
+
+    // Check ingredients for spam
+    for (let i = 0; i < cleanIngredients.length; i++) {
+      if (hasRepetitivePattern(cleanIngredients[i])) {
+        errs.push(`Ingredient ${i + 1} appears to contain repetitive/spam content`);
+        break;
+      }
+    }
+
+    // Check if description has at least 3 different words
+    const descriptionWords = description.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const uniqueDescWords = new Set(descriptionWords);
+    if (description && uniqueDescWords.size < 3) {
+      errs.push("Description should contain at least 3 different meaningful words");
+    }
+
+    // Check if instructions have enough variety
+    const allInstructionWords = cleanInstructions.join(' ').toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const uniqueInstructionWords = new Set(allInstructionWords);
+    if (cleanInstructions.length > 0 && uniqueInstructionWords.size < 5) {
+      errs.push("Instructions should contain more varied content - please describe the cooking steps properly");
+    }
+
+    // ========== CROSS-FIELD DUPLICATE DETECTION ==========
+    // Check if ingredients and instructions are the same or too similar
+    const ingredientsText = cleanIngredients.join(' ').toLowerCase().trim();
+    const instructionsText = cleanInstructions.join(' ').toLowerCase().trim();
+
+    if (ingredientsText && instructionsText) {
+      // Exact match check
+      if (ingredientsText === instructionsText) {
+        errs.push("Ingredients and Instructions cannot be the same - please provide actual cooking steps");
+      } else {
+        // Similarity check - if 80%+ of words are shared, it's too similar
+        const ingredientWordSet = new Set(ingredientsText.split(/\s+/).filter(w => w.length > 2));
+        const instructionWordSet = new Set(instructionsText.split(/\s+/).filter(w => w.length > 2));
+
+        if (ingredientWordSet.size > 0 && instructionWordSet.size > 0) {
+          const sharedWords = [...ingredientWordSet].filter(w => instructionWordSet.has(w));
+          const similarityRatio = sharedWords.length / Math.min(ingredientWordSet.size, instructionWordSet.size);
+
+          if (similarityRatio > 0.8) {
+            errs.push("Instructions are too similar to ingredients - please write actual cooking steps");
+          }
+        }
+      }
+    }
+
+    // Check if description is just copied from ingredients or instructions
+    if (description) {
+      const descLower = description.toLowerCase().trim();
+      if (descLower === ingredientsText || descLower === instructionsText) {
+        errs.push("Description cannot be the same as ingredients or instructions");
+      }
+    }
+
+    // Check for duplicate entries within ingredients
+    const ingredientSet = new Set(cleanIngredients.map(i => i.toLowerCase().trim()));
+    if (ingredientSet.size < cleanIngredients.length && cleanIngredients.length > 1) {
+      errs.push("You have duplicate ingredients - please remove duplicates");
+    }
+
+    // Check for duplicate entries within instructions
+    const instructionSet = new Set(cleanInstructions.map(i => i.toLowerCase().trim()));
+    if (instructionSet.size < cleanInstructions.length && cleanInstructions.length > 1) {
+      errs.push("You have duplicate instruction steps - please remove duplicates");
+    }
+
+    // ========== ORIGINAL CONTENT CONFIRMATION ==========
+    if (!confirmsOriginalContent) {
+      errs.push("Please confirm that this recipe is your original content or properly attributed");
+    }
 
     // Check image validation if image exists
     if (uploadForm.image && uploadImageValidation && !uploadImageValidation.approved && !uploadImageValidation.skipped) {
@@ -2874,6 +3041,44 @@ export default function CommunityRecipes() {
                   rows={3}
                   placeholder="Add any cooking tips or variations..."
                 />
+              </div>
+
+              {/* Original Content Confirmation */}
+              <div className="cr-form-group" style={{
+                background: 'linear-gradient(135deg, #fef3c7 0%, #fef9c3 100%)',
+                border: '1px solid #fcd34d',
+                borderRadius: '12px',
+                padding: '16px',
+                marginTop: '8px'
+              }}>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '12px',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                  color: '#78350f'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={confirmsOriginalContent}
+                    onChange={(e) => setConfirmsOriginalContent(e.target.checked)}
+                    style={{
+                      width: '18px',
+                      height: '18px',
+                      marginTop: '2px',
+                      accentColor: '#f59e0b',
+                      flexShrink: 0
+                    }}
+                  />
+                  <span style={{ lineHeight: '1.5' }}>
+                    <strong style={{ display: 'block', marginBottom: '4px', color: '#92400e' }}>
+                      Original Content Declaration *
+                    </strong>
+                    I confirm that this recipe is my own original creation, or I have proper permission/attribution to share it.
+                    I understand that copying content from other sources without permission violates community guidelines.
+                  </span>
+                </label>
               </div>
             </div>
 

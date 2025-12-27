@@ -1,8 +1,9 @@
 // src/pages/Login.js
 import React, { useState } from "react";
-import { Mail, Lock, User, Eye, EyeOff, AlertCircle, Loader } from "lucide-react";
+import { Mail, Lock, User, Eye, EyeOff, AlertCircle, Loader, FileText } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import TermsConsentModal from "../components/TermsConsentModal";
 
 const API_BASE = (process.env.REACT_APP_API_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -15,17 +16,19 @@ export default function Login() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const [formData, setFormData] = useState({ 
-    firstName: "", 
-    lastName: "", 
-    email: "", 
-    password: "", 
-    confirmPassword: "" 
+  const [formData, setFormData] = useState({
+    firstName: "",
+    lastName: "",
+    email: "",
+    password: "",
+    confirmPassword: ""
   });
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
   const [apiError, setApiError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [agreesToTerms, setAgreesToTerms] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
   const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const validatePassword = (password) => password.length >= 8;
@@ -43,6 +46,7 @@ export default function Login() {
     if (!isLogin) {
       if (!formData.confirmPassword) newErrors.confirmPassword = "Please confirm your password";
       else if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = "Passwords do not match";
+      if (!agreesToTerms) newErrors.terms = "You must agree to the Terms and Privacy Policy";
     }
     return newErrors;
   };
@@ -192,6 +196,7 @@ export default function Login() {
     setTouched({});
     setApiError("");
     setSuccessMessage("");
+    setAgreesToTerms(false);
   };
 
   return (
@@ -384,6 +389,65 @@ export default function Login() {
               </div>
             )}
 
+            {/* Terms and Conditions Checkbox - Signup Only */}
+            {!isLogin && (
+              <div className="mt-2">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={agreesToTerms}
+                    onChange={(e) => {
+                      setAgreesToTerms(e.target.checked);
+                      if (e.target.checked && errors.terms) {
+                        setErrors((prev) => {
+                          const newErrs = { ...prev };
+                          delete newErrs.terms;
+                          return newErrs;
+                        });
+                      }
+                    }}
+                    disabled={isLoading}
+                    className="w-4 h-4 mt-0.5 accent-yellow-400 rounded"
+                  />
+                  <span className="text-xs sm:text-sm text-gray-600 leading-relaxed">
+                    I agree to the{" "}
+                    <Link
+                      to="/terms"
+                      target="_blank"
+                      className="text-yellow-500 hover:text-yellow-600 font-semibold underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Terms and Conditions
+                    </Link>{" "}
+                    and{" "}
+                    <Link
+                      to="/privacy"
+                      target="_blank"
+                      className="text-yellow-500 hover:text-yellow-600 font-semibold underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      Privacy Policy
+                    </Link>
+                  </span>
+                </label>
+                {/* Read Terms Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowTermsModal(true)}
+                  className="mt-2 flex items-center gap-2 text-xs sm:text-sm text-yellow-500 hover:text-yellow-600 font-medium transition"
+                >
+                  <FileText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  Read Terms & Privacy Summary
+                </button>
+                {errors.terms && (
+                  <div className="flex items-center gap-2 mt-2 text-red-500 text-xs sm:text-sm">
+                    <AlertCircle className="w-3 h-3 sm:w-4 sm:h-4" />
+                    <span>{errors.terms}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {isLogin && (
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -439,7 +503,25 @@ export default function Login() {
             <p className="text-lg opacity-90">Join thousands of food lovers exploring the best dishes in town</p>
           </div>
         </div>
-      </div> 
+      </div>
+
+      {/* Terms Modal - For viewing terms during signup */}
+      <TermsConsentModal
+        isOpen={showTermsModal}
+        onAccept={() => {
+          setShowTermsModal(false);
+          setAgreesToTerms(true);
+          if (errors.terms) {
+            setErrors((prev) => {
+              const newErrs = { ...prev };
+              delete newErrs.terms;
+              return newErrs;
+            });
+          }
+        }}
+        onClose={() => setShowTermsModal(false)}
+        showCloseButton={true}
+      />
     </div>
   );
 }
