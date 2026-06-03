@@ -15,6 +15,7 @@ const connectDB = require('./db/mongo');
 const recipesRoutes = require('./routes/recipes');
 
 const app = express();
+app.set('trust proxy', 1); // behind Render's proxy — trust first hop so express-rate-limit reads X-Forwarded-For correctly
 const server = http.createServer(app); // <-- use http server so socket.io can attach
 
 // ──────────────────────────────────────────────────────────────
@@ -203,7 +204,7 @@ const gracefulShutdown = (signal) => {
       console.log('[Server] HTTP server closed');
 
       // Close MongoDB connection
-      mongoose.connection.close(false, () => {
+      mongoose.connection.close(false).then(() => {
         console.log('[Server] MongoDB connection closed');
         process.exit(0);
       });
