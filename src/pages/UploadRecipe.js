@@ -4,6 +4,8 @@ import { Plus, X, Camera, Loader2, CheckCircle, AlertCircle } from 'lucide-react
 import Swal from 'sweetalert2';
 import { useAuth } from '../auth/AuthContext';
 
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:4000";
+
 const TAG_OPTIONS = [
   "filipino","american","italian","japanese","korean","chinese","thai","indian",
   "burger","pizza","pasta","ramen","sushi","bbq","seafood","vegan","vegetarian",
@@ -229,7 +231,7 @@ export default function UploadRecipe() {
         const headers = { "Content-Type": "application/json" };
         if (isAuthenticated) Object.assign(headers, authHeaders());
 
-        const response = await fetch(`http://localhost:4000/api/recipes/copyright-status/${copyrightUploadId}`, {
+        const response = await fetch(`${API_BASE}/api/recipes/copyright-status/${copyrightUploadId}`, {
           method: "GET",
           headers,
         });
@@ -313,7 +315,7 @@ export default function UploadRecipe() {
       const headers = { "Content-Type": "application/json" };
       if (isAuthenticated) Object.assign(headers, authHeaders());
 
-      const res = await fetch("http://localhost:4000/api/recipes/validate-image", {
+      const res = await fetch(`${API_BASE}/api/recipes/validate-image`, {
         method: "POST",
         headers,
         body: JSON.stringify({ image: imageData }),
@@ -551,7 +553,7 @@ export default function UploadRecipe() {
       const headers = { "Content-Type": "application/json" };
       if (isAuthenticated) Object.assign(headers, authHeaders());
 
-      const res = await fetch("http://localhost:4000/api/recipes", {
+      const res = await fetch(`${API_BASE}/api/recipes`, {
         method: "POST",
         headers,
         body: JSON.stringify(recipeData),
@@ -609,12 +611,6 @@ export default function UploadRecipe() {
             Add <span className="text-[#FFBF00]">A</span> Plate
           </h1>
           <p className="text-center text-[#92400E] mb-8">Share your culinary creation with the community</p>
-
-          {/* TEMPORARY DEBUG BANNER - Remove after confirming copyright UI works */}
-          <div className="bg-purple-600 text-white p-2 text-xs font-mono rounded mb-4">
-            DEBUG: uploadId={copyrightUploadId || 'null'} | status={copyrightStatus || 'null'} |
-            result={copyrightResult ? copyrightResult.riskLevel : 'null'}
-          </div>
 
           {/* Dish Name */}
           <div className="mb-6">
