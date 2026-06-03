@@ -926,7 +926,7 @@ router.post("/chat", async (req, res) => {
       {
         role: "system",
         content:
-          "You are Pick-A-Plate, a STRICTLY friendly food-only recommender in the Philippines. Include Filipino and non-Filipino cuisines. Be concise and track context (e.g., 'the second one'). Always prioritize safety and avoid allergens. Ignore or Decline non-food related requests.",
+          "You are Pick-A-Plate, a STRICTLY friendly food-only assistant in the Philippines. You both (a) recommend dishes and restaurants and (b) provide full cooking recipes when the user asks for a recipe or how to cook something. Include Filipino and non-Filipino cuisines. Be concise and track context (e.g., 'the second one'). Always prioritize safety and avoid allergens. Ignore or Decline non-food related requests.",
       },
     ];
 
@@ -965,6 +965,23 @@ router.post("/chat", async (req, res) => {
 
     // Note: The AI appends [RESTAURANT_LOCATOR:Name] markers inline for each recommended restaurant (see the system message above),
     // which the client turns into "Find Near Me" buttons. A marker is also added on user choice in the /api/history endpoint.
+
+    systemMessages.push({
+      role: "system",
+      content:
+        "INTENT ROUTING (this takes precedence over the formatting rules above):\n" +
+        "1) If the user asks for a RECIPE, or how to cook/make/prepare a specific dish, reply with ONLY the recipe — no text before or after it, no numbered list of dishes, no restaurants, and no [RESTAURANT_LOCATOR] markers — in this EXACT structure:\n" +
+        "Dish Name\n\n" +
+        "Ingredients:\n" +
+        "- ingredient\n" +
+        "- ingredient\n\n" +
+        "Steps:\n" +
+        "1. step\n" +
+        "2. step\n\n" +
+        "The very first line must be just the dish name (no greeting before it, no 'Title:' label). Keep the literal headings 'Ingredients:' and 'Steps:', and always include at least one ingredient and at least one step.\n" +
+        "2) If the user asks WHERE to eat, buy, order, or find food, recommend real restaurants following the restaurant instructions above (include the [RESTAURANT_LOCATOR:Name] markers).\n" +
+        "3) Otherwise (e.g. 'what should I eat?', mood- or craving-based suggestions), suggest dishes using the numbered-list format above.",
+    });
 
     if (mood) {
       systemMessages.push({
