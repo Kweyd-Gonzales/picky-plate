@@ -24,7 +24,7 @@ try {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((r) => {
-      const [mood, food] = r.split(",");
+      const [food, mood] = r.split(",");
       return { mood: mood?.trim(), food: food?.trim() };
     });
   // console.log("Loaded mood CSV rows:", moodCSV.length);
