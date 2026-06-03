@@ -955,8 +955,16 @@ router.post("/chat", async (req, res) => {
         "Make sure that all of the restaurants are located in the Philippines.",
     });
 
-    // Note: Restaurant Locator buttons are shown ONLY when user clicks "I'm choosing this!" on a restaurant
-    // The button is added automatically in /api/history endpoint, not by the AI
+        systemMessages.push({
+      role: "system",
+      content:
+        "When you recommend a REAL, specific restaurant (an actual place the user can physically visit), append a marker in the exact format [RESTAURANT_LOCATOR:Exact Name] on the SAME line, immediately after that restaurant's entry. " +
+        'Use the restaurant\'s exact name inside the marker, e.g. "1. Manam: Modern Filipino spot in BGC. [RESTAURANT_LOCATOR:Manam]". ' +
+        "NEVER add this marker for dishes, recipes, snacks, or generic food items — only for actual named restaurants the user could go to.",
+    });
+
+    // Note: The AI appends [RESTAURANT_LOCATOR:Name] markers inline for each recommended restaurant (see the system message above),
+    // which the client turns into "Find Near Me" buttons. A marker is also added on user choice in the /api/history endpoint.
 
     if (mood) {
       systemMessages.push({
@@ -1045,7 +1053,7 @@ router.post("/chat", async (req, res) => {
       const r = await openai.responses.create({
         model: "gpt-4o-mini",
         input,
-        max_output_tokens: 300,
+        max_output_tokens: 450,
       });
       reply = (r?.output_text || "").trim();
     } catch (err) {
