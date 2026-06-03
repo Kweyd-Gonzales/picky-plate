@@ -238,8 +238,8 @@ router.post("/suggest-week", protect, async (req, res) => {
     }
 
         /* USER + KID preferences */
-    const userPrefs = await UserPreferences.findOne({ user: req.user.id }).lean();
-    const kids = await KidPreferences.find({ user: req.user.id }).lean();
+    const userPrefs = await UserPreferences.findOne({ userId: req.user.id }).lean();
+    const kids = await KidPreferences.find({ userId: req.user.id }).lean();
 
     const dislikeSet = new Set();
     const avoidAllergenSet = new Set();
