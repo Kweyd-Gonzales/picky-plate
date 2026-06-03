@@ -607,7 +607,7 @@ export default function Explorer() {
                   src={dish.img}
                   alt={dish.name}
                   loading="lazy"
-                  onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/images/PickAPlate.png"; }}
+                  onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/images/filipino.jpg"; }}
                   style={{
                     opacity: dish.imageLoading ? 0.5 : 1,
                     transition: 'opacity 0.4s ease-in-out'
@@ -697,7 +697,7 @@ export default function Explorer() {
                 X
               </button>
             </div>
-            <img className="modal-img" src={modalDish.img} alt={modalDish.name} loading="lazy" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/images/PickAPlate.png"; }} />
+            <img className="modal-img" src={modalDish.img} alt={modalDish.name} loading="lazy" onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/images/filipino.jpg"; }} />
             <p className="modal-desc">{modalDish.desc}</p>
 
             {modalDish.ingredients && modalDish.ingredients.length > 0 && (
