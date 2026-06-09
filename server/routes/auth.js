@@ -257,6 +257,7 @@ router.post('/request-otp', async (req, res) => {
       cooldownSec: OTP_RESEND_COOLDOWN_SEC,
     });
   } catch (e) {
+    console.error('[OTP send error]', e);
     return res.status(500).json({ success: false, message: 'Error sending OTP' });
   }
 });
@@ -364,6 +365,7 @@ router.post('/forgot-password', async (req, res) => {
       cooldownSec: OTP_RESEND_COOLDOWN_SEC,
     });
   } catch (e) {
+    console.error('[OTP send error]', e);
     return res.status(500).json({ success: false, message: 'Error sending password reset OTP' });
   }
 });
